@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import hashlib
 
 st.set_page_config(page_title="Hospitality CRM Pro", layout="wide")
 
@@ -9,6 +10,19 @@ st.set_page_config(page_title="Hospitality CRM Pro", layout="wide")
 
 conn = sqlite3.connect("hospitality.db", check_same_thread=False)
 c = conn.cursor()
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Users Table
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT
+)
+""")
 
 # Guests Table
 c.execute("""
@@ -36,168 +50,174 @@ CREATE TABLE IF NOT EXISTS feedback (
 )
 """)
 
-# Staff Table
-c.execute("""
-CREATE TABLE IF NOT EXISTS staff (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    staff_name TEXT UNIQUE
-)
-""")
-
 conn.commit()
 
-# ---------------- CHECK FEEDBACK LINK ---------------- #
+# Default Admin Create
+admin_check = pd.read_sql_query("SELECT * FROM users WHERE role='admin'", conn)
+if admin_check.empty:
+    c.execute("INSERT INTO users (username, password, role) VALUES (?,?,?)",
+              ("admin", hash_password("admin123"), "admin"))
+    conn.commit()
 
-query_params = st.query_params
+# ---------------- LOGIN ---------------- #
 
-if "feedback_id" in query_params:
+if "user" not in st.session_state:
+    st.session_state.user = None
+    st.session_state.role = None
 
-    guest_id = query_params["feedback_id"]
+if st.session_state.user is None:
 
-    guest = pd.read_sql_query(
-        "SELECT * FROM guests WHERE id=?",
-        conn,
-        params=(guest_id,)
-    )
+    st.title("🔐 Login")
 
-    if not guest.empty:
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
-        st.title("⭐ Guest Feedback Form")
+    if st.button("Login"):
+        user = pd.read_sql_query(
+            "SELECT * FROM users WHERE username=? AND password=?",
+            conn,
+            params=(username, hash_password(password))
+        )
 
-        st.write("Guest Name:", guest["name"][0])
-        st.write("Mobile:", guest["mobile"][0])
-
-        rating = st.slider("Overall Rating", 1, 5)
-        service = st.selectbox("Service", ["Excellent", "Good", "Average", "Poor"])
-        food = st.selectbox("Food", ["Excellent", "Good", "Average", "Poor"])
-        behaviour = st.selectbox("Behaviour", ["Excellent", "Good", "Average", "Poor"])
-        comment = st.text_area("Additional Comments")
-
-        if st.button("Submit Feedback"):
-            c.execute("""
-            INSERT INTO feedback
-            (guest_id, rating, service, food, behaviour, comment, date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (guest_id, rating, service, food, behaviour, comment, datetime.now().date()))
-            conn.commit()
-            st.success("Thank You ❤️")
-
-    else:
-        st.error("Invalid Feedback Link")
+        if not user.empty:
+            st.session_state.user = username
+            st.session_state.role = user["role"][0]
+            st.success("Login Successful")
+            st.rerun()
+        else:
+            st.error("Invalid Credentials")
 
     st.stop()
 
-# ---------------- SIDEBAR ---------------- #
+# ---------------- LOGOUT ---------------- #
 
-st.sidebar.title("📌 Navigation")
-page = st.sidebar.radio("Go To", ["Guest Entry", "Admin Panel"])
+st.sidebar.write("Logged in as:", st.session_state.user)
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.session_state.role = None
+    st.rerun()
 
-# ---------------- GUEST ENTRY ---------------- #
+role = st.session_state.role
 
-if page == "Guest Entry":
+# ---------------- STAFF PANEL ---------------- #
 
-    st.title("📝 Visitor Entry Form")
+if role == "staff":
 
-    staff_list = pd.read_sql_query("SELECT staff_name FROM staff", conn)
-    staff_names = staff_list["staff_name"].tolist()
+    st.title("👨‍💼 Staff Dashboard")
 
-    col1, col2 = st.columns(2)
+    st.subheader("➕ Add Entry")
 
-    with col1:
-        name = st.text_input("Guest Name")
-        mobile = st.text_input("Mobile Number")
+    name = st.text_input("Guest Name")
+    mobile = st.text_input("Mobile")
+    category = st.selectbox("Source", ["Zomato","Swiggy","Easy Dinner","Party","Walk-In","VIP","Other"])
+    visit_date = st.date_input("Visit Date")
 
-    with col2:
-        category = st.selectbox("Booking Source", [
-            "Zomato",
-            "Swiggy",
-            "Easy Dinner",
-            "Party",
-            "Walk-In",
-            "VIP",
-            "Other"
-        ])
-        staff = st.selectbox("Staff Name", staff_names if staff_names else ["No Staff Added"])
+    if st.button("Submit"):
+        c.execute("""
+        INSERT INTO guests (name, mobile, category, visit_date, staff_name)
+        VALUES (?,?,?,?,?)
+        """, (name, mobile, category, visit_date, st.session_state.user))
+        conn.commit()
+        st.success("Entry Added")
 
-    if st.button("Submit Entry"):
-        if name and mobile and staff != "No Staff Added":
-            c.execute("""
-            INSERT INTO guests (name, mobile, category, visit_date, staff_name)
-            VALUES (?, ?, ?, ?, ?)
-            """, (name, mobile, category, datetime.now().date(), staff))
+    st.subheader("📅 Today's Entries")
+
+    today = pd.read_sql_query("""
+    SELECT * FROM guests
+    WHERE staff_name=? AND visit_date=date('now')
+    """, conn, params=(st.session_state.user,))
+    st.dataframe(today)
+    st.write("Total Today:", len(today))
+
+    st.subheader("✏ Edit My Entries")
+
+    my_data = pd.read_sql_query("""
+    SELECT * FROM guests WHERE staff_name=?
+    """, conn, params=(st.session_state.user,))
+
+    st.dataframe(my_data)
+
+    edit_id = st.number_input("Enter ID to Edit", step=1)
+
+    if st.button("Load Entry"):
+        entry = pd.read_sql_query("SELECT * FROM guests WHERE id=?", conn, params=(edit_id,))
+        if not entry.empty:
+            st.session_state.editing = edit_id
+
+    if "editing" in st.session_state:
+        new_name = st.text_input("New Name")
+        if st.button("Update Entry"):
+            c.execute("UPDATE guests SET name=? WHERE id=?",
+                      (new_name, st.session_state.editing))
             conn.commit()
+            st.success("Updated")
+            del st.session_state.editing
 
-            guest_id = c.lastrowid
-            feedback_link = f"http://localhost:8501/?feedback_id={guest_id}"
-
-            st.success("Entry Saved Successfully ✅")
-            st.write("📩 Send this feedback link to guest:")
-            st.code(feedback_link)
-
-        else:
-            st.error("Please fill all required fields")
+    st.subheader("🔑 Change Password")
+    new_pass = st.text_input("New Password", type="password")
+    if st.button("Change Password"):
+        c.execute("UPDATE users SET password=? WHERE username=?",
+                  (hash_password(new_pass), st.session_state.user))
+        conn.commit()
+        st.success("Password Updated")
 
 # ---------------- ADMIN PANEL ---------------- #
 
-elif page == "Admin Panel":
+if role == "admin":
 
-    st.title("🔐 Admin Login")
-    password = st.text_input("Enter Password", type="password")
+    st.title("👑 Admin Dashboard")
 
-    if password == "admin123":
+    page = st.sidebar.radio("Admin Menu", ["Overview","Manage Staff","Edit Data","Export Data","Change Password"])
 
-        st.success("Login Successful ✅")
+    if page == "Overview":
+        data = pd.read_sql_query("SELECT * FROM guests", conn)
+        st.dataframe(data)
+        summary = pd.read_sql_query("""
+        SELECT category, COUNT(*) as Total FROM guests GROUP BY category
+        """, conn)
+        st.bar_chart(summary.set_index("category"))
 
-        # -------- STAFF MANAGEMENT -------- #
+    if page == "Manage Staff":
+        st.subheader("Add Staff")
+        new_staff = st.text_input("Username")
+        new_pass = st.text_input("Password", type="password")
+        if st.button("Create Staff"):
+            try:
+                c.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)",
+                          (new_staff, hash_password(new_pass), "staff"))
+                conn.commit()
+                st.success("Staff Created")
+            except:
+                st.error("User Exists")
 
-        st.subheader("👨‍💼 Staff Management")
+        staff_list = pd.read_sql_query("SELECT username FROM users WHERE role='staff'", conn)
+        st.dataframe(staff_list)
 
-        new_staff = st.text_input("Add New Staff")
-        if st.button("Add Staff"):
-            if new_staff:
-                try:
-                    c.execute("INSERT INTO staff (staff_name) VALUES (?)", (new_staff,))
-                    conn.commit()
-                    st.success("Staff Added")
-                except:
-                    st.error("Staff Already Exists")
-
-        staff_data = pd.read_sql_query("SELECT * FROM staff", conn)
-        st.dataframe(staff_data)
-
-        remove_staff = st.selectbox("Remove Staff", staff_data["staff_name"] if not staff_data.empty else [])
-        if st.button("Remove Staff"):
-            c.execute("DELETE FROM staff WHERE staff_name=?", (remove_staff,))
+        remove = st.selectbox("Remove Staff", staff_list["username"] if not staff_list.empty else [])
+        if st.button("Delete Staff"):
+            c.execute("DELETE FROM users WHERE username=?", (remove,))
             conn.commit()
             st.success("Staff Removed")
 
-        # -------- REPORTS -------- #
+    if page == "Edit Data":
+        data = pd.read_sql_query("SELECT * FROM guests", conn)
+        st.dataframe(data)
 
-        st.subheader("📅 Today's Entries")
-        today = pd.read_sql_query("""
-        SELECT * FROM guests WHERE visit_date=date('now')
-        """, conn)
-        st.dataframe(today)
+        edit_id = st.number_input("ID to Edit", step=1)
+        new_name = st.text_input("New Name")
+        if st.button("Update Data"):
+            c.execute("UPDATE guests SET name=? WHERE id=?", (new_name, edit_id))
+            conn.commit()
+            st.success("Updated")
 
-        st.subheader("📊 Booking Source Summary")
-        summary = pd.read_sql_query("""
-        SELECT category, COUNT(*) as Total
-        FROM guests
-        GROUP BY category
-        """, conn)
-        st.dataframe(summary)
-        if not summary.empty:
-            st.bar_chart(summary.set_index("category"))
+    if page == "Export Data":
+        data = pd.read_sql_query("SELECT * FROM guests", conn)
+        st.download_button("Download CSV", data.to_csv(index=False), "data.csv")
 
-        st.subheader("⭐ Feedback Overview")
-
-        feedback_data = pd.read_sql_query("""
-        SELECT g.name, g.mobile, f.rating, f.service, f.food, f.behaviour, f.comment, f.date
-        FROM feedback f
-        JOIN guests g ON f.guest_id = g.id
-        """, conn)
-
-        st.dataframe(feedback_data)
-
-    elif password != "":
-        st.error("Wrong Password ❌")
+    if page == "Change Password":
+        new_pass = st.text_input("New Password", type="password")
+        if st.button("Change Admin Password"):
+            c.execute("UPDATE users SET password=? WHERE username='admin'",
+                      (hash_password(new_pass),))
+            conn.commit()
+            st.success("Password Updated")
