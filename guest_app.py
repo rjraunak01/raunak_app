@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import hashlib
+import urllib.parse
 
 st.set_page_config(page_title="Hospitality CRM PRO", layout="wide")
 
@@ -21,11 +22,6 @@ st.markdown("""
     font-weight: bold;
     color: #1F618D;
 }
-.section-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-top: 15px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -37,7 +33,7 @@ c = conn.cursor()
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# USERS
+# USERS TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# GUESTS
+# GUESTS TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS guests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +60,7 @@ CREATE TABLE IF NOT EXISTS guests (
 )
 """)
 
-# FEEDBACK
+# FEEDBACK TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,7 +102,6 @@ if "feedback" in query:
     behaviour = st.slider("😊 Staff Behaviour",1,5)
     ambience = st.slider("✨ Ambience",1,5)
     cleanliness = st.slider("🧼 Cleanliness",1,5)
-
     comment = st.text_area("Additional Comments")
 
     if st.button("Submit Feedback"):
@@ -131,14 +126,17 @@ if "user" not in st.session_state:
 
 if st.session_state.user is None:
 
-    st.title("Login")
+    st.title("Hospitality CRM Login")
 
-    users = pd.read_sql_query("SELECT username FROM users", conn)
+    users = pd.read_sql_query(
+        "SELECT username FROM users ORDER BY role DESC, username ASC",
+        conn
+    )
 
-    selected_user = st.selectbox("Select User", users["username"])
-    password = st.text_input("Password", type="password")
+    selected_user = st.selectbox("Select Your ID", users["username"])
+    password = st.text_input("Enter Password", type="password")
 
-    if st.button("Login"):
+    if st.button("Login", use_container_width=True):
         user = pd.read_sql_query(
             "SELECT * FROM users WHERE username=? AND password=?",
             conn,
@@ -169,50 +167,52 @@ if role == "staff":
     ).iloc[0]
 
     if user_data["can_add"] == 1:
-        st.subheader("Add Entry")
+        st.subheader("Add Guest Entry")
         name = st.text_input("Guest Name")
         mobile = st.text_input("Mobile")
         category = st.text_input("Source")
         visit_date = st.date_input("Visit Date")
 
         if st.button("Submit Entry"):
+
             c.execute("""
             INSERT INTO guests (name,mobile,category,visit_date,staff_name)
             VALUES (?,?,?,?,?)
             """,(name,mobile,category,visit_date,st.session_state.user))
             conn.commit()
-            guest_id = c.lastrowid
-            st.success("Entry Added")
 
-            feedback_link = f"http://localhost:8501/?feedback={guest_id}"
-            st.write("Send this feedback link to guest:")
+            guest_id = c.lastrowid
+
+            # Auto Base URL
+            base_url = st.get_option("browser.serverAddress")
+            if not base_url:
+                base_url = "http://localhost:8501"
+
+            feedback_link = f"{base_url}/?feedback={guest_id}"
+
+            message = f"""
+Thank you for visiting us 🙏
+
+Please share your valuable feedback:
+{feedback_link}
+"""
+
+            encoded_message = urllib.parse.quote(message)
+            whatsapp_link = f"https://wa.me/?text={encoded_message}"
+
+            st.success("Entry Added Successfully ✅")
+
+            st.link_button("📲 Send on WhatsApp", whatsapp_link)
             st.code(feedback_link)
 
-    my_data = pd.read_sql_query("""
-    SELECT * FROM guests WHERE staff_name=?
-    """, conn, params=(st.session_state.user,))
+    my_data = pd.read_sql_query(
+        "SELECT * FROM guests WHERE staff_name=?",
+        conn,
+        params=(st.session_state.user,)
+    )
 
     st.subheader("My Entries")
     st.dataframe(my_data)
-
-    st.write("Today Entries:",
-             len(my_data[my_data["visit_date"] == str(datetime.today().date())]))
-
-    if user_data["can_edit"] == 1:
-        edit_id = st.number_input("Edit ID", step=1)
-        new_name = st.text_input("New Name")
-        if st.button("Update"):
-            c.execute("""
-            UPDATE guests SET name=?
-            WHERE id=? AND staff_name=?
-            """,(new_name,edit_id,st.session_state.user))
-            conn.commit()
-            st.success("Updated")
-
-    if user_data["can_export"] == 1:
-        st.download_button("Export My Data",
-                           my_data.to_csv(index=False),
-                           "my_data.csv")
 
     st.subheader("Change Password")
     new_pass = st.text_input("New Password", type="password")
@@ -258,16 +258,15 @@ if role == "admin":
 
     if menu == "Reports":
 
-        st.subheader("Repeat Customers")
         repeat = pd.read_sql_query("""
         SELECT name,mobile,COUNT(*) as visits
         FROM guests
         GROUP BY mobile
         HAVING visits>1
         """, conn)
+        st.subheader("Repeat Customers")
         st.dataframe(repeat)
 
-        st.subheader("Feedback Report")
         feedback_data = pd.read_sql_query("""
         SELECT g.name,g.mobile,
         f.food,f.service,f.behaviour,
@@ -276,6 +275,7 @@ if role == "admin":
         FROM feedback f
         JOIN guests g ON f.guest_id=g.id
         """, conn)
+        st.subheader("Feedback Report")
         st.dataframe(feedback_data)
 
     if menu == "Delete Guest":
