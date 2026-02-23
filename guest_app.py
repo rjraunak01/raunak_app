@@ -5,9 +5,13 @@ from datetime import datetime
 import hashlib
 import urllib.parse
 
+# ================== CONFIG ================== #
+
 st.set_page_config(page_title="CARNIVALE - Hospitality CRM", layout="wide")
 
-# ---------------- STYLE ---------------- #
+APP_URL = "https://yourappname.streamlit.app"  # 🔴 CHANGE THIS
+
+# ================== STYLE ================== #
 
 st.markdown("""
 <style>
@@ -31,7 +35,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- DATABASE ---------------- #
+# ================== DATABASE ================== #
 
 conn = sqlite3.connect("hospitality.db", check_same_thread=False)
 c = conn.cursor()
@@ -39,7 +43,7 @@ c = conn.cursor()
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# USERS
+# USERS TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +54,7 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# GUESTS
+# GUESTS TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS guests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +67,7 @@ CREATE TABLE IF NOT EXISTS guests (
 )
 """)
 
-# FEEDBACK
+# FEEDBACK TABLE
 c.execute("""
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +84,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 conn.commit()
 
-# Default Admin
+# CREATE DEFAULT ADMIN
 admin_check = pd.read_sql_query("SELECT * FROM users WHERE role='admin'", conn)
 if admin_check.empty:
     c.execute("""
@@ -89,7 +93,7 @@ if admin_check.empty:
     """, ("admin", hash_password("admin123"), "admin",1))
     conn.commit()
 
-# ---------------- FEEDBACK PAGE ---------------- #
+# ================== FEEDBACK PAGE ================== #
 
 query = st.query_params
 
@@ -121,7 +125,7 @@ if "feedback" in query:
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# ---------------- LOGIN ---------------- #
+# ================== LOGIN ================== #
 
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -132,6 +136,10 @@ if st.session_state.user is None:
     st.title("CARNIVALE - Login")
 
     users = pd.read_sql_query("SELECT username FROM users", conn)
+
+    if users.empty:
+        st.error("No users found")
+        st.stop()
 
     selected_user = st.selectbox("Select Your ID", users["username"])
     password = st.text_input("Enter Password", type="password")
@@ -153,21 +161,22 @@ if st.session_state.user is None:
     st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
     st.stop()
 
-# Logout
+# ================== LOGOUT ================== #
+
 st.sidebar.write(f"Logged in as: {st.session_state.user}")
 if st.sidebar.button("Logout"):
     st.session_state.user = None
     st.session_state.role = None
     st.rerun()
 
-# ---------------- STAFF PANEL ---------------- #
+# ================== STAFF PANEL ================== #
 
 if st.session_state.role in ["staff","admin"]:
 
     st.title("CARNIVALE - Guest Entry")
 
     name = st.text_input("Guest Name")
-    mobile = st.text_input("Mobile")
+    mobile = st.text_input("Mobile Number")
 
     category = st.selectbox(
         "Category",
@@ -175,35 +184,38 @@ if st.session_state.role in ["staff","admin"]:
     )
 
     pax = st.number_input("Number of Guests (PAX)", min_value=1, step=1)
-
     visit_date = st.date_input("Visit Date")
 
     if st.button("Submit Entry"):
 
-        c.execute("""
-        INSERT INTO guests (name,mobile,category,pax,visit_date,staff_name)
-        VALUES (?,?,?,?,?,?)
-        """,(name,mobile,category,pax,visit_date,st.session_state.user))
-        conn.commit()
+        if name == "" or mobile == "":
+            st.warning("Please fill required fields")
+        else:
+            c.execute("""
+            INSERT INTO guests (name,mobile,category,pax,visit_date,staff_name)
+            VALUES (?,?,?,?,?,?)
+            """,(name,mobile,category,pax,visit_date,st.session_state.user))
+            conn.commit()
 
-        guest_id = c.lastrowid
+            guest_id = c.lastrowid
 
-        feedback_link = f"?feedback={guest_id}"
+            feedback_link = f"{APP_URL}/?feedback={guest_id}"
 
-        message = f"""Thank you for visiting CARNIVALE 🙏
+            message = f"""Thank you for visiting CARNIVALE 🙏
 
 Please share your valuable feedback:
 {feedback_link}
 """
 
-        encoded_message = urllib.parse.quote(message)
-        whatsapp_link = f"https://wa.me/?text={encoded_message}"
+            encoded_message = urllib.parse.quote(message)
+            whatsapp_link = f"https://wa.me/?text={encoded_message}"
 
-        st.success("Entry Added Successfully ✅")
-        st.link_button("📲 Send on WhatsApp", whatsapp_link)
-        st.write("Or Copy Link:")
-        st.code(feedback_link)
+            st.success("Entry Added Successfully ✅")
+            st.link_button("📲 Send on WhatsApp", whatsapp_link)
+            st.write("Or Copy Link:")
+            st.code(feedback_link)
 
+    st.subheader("All Guest Entries")
     data = pd.read_sql_query("SELECT * FROM guests", conn)
     st.dataframe(data)
 
