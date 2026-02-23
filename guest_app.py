@@ -5,37 +5,13 @@ from datetime import datetime
 import hashlib
 import urllib.parse
 
-# ================== CONFIG ================== #
+# ================= CONFIG ================= #
 
 st.set_page_config(page_title="CARNIVALE - Hospitality CRM", layout="wide")
 
-APP_URL = "https://yourappname.streamlit.app"  # 🔴 CHANGE THIS
+APP_URL = "https://your-real-app-name.streamlit.app"  # 🔴 PUT REAL URL
 
-# ================== STYLE ================== #
-
-st.markdown("""
-<style>
-.main-card {
-    background-color: white;
-    padding: 30px;
-    border-radius: 15px;
-    box-shadow: 0px 10px 25px rgba(0,0,0,0.1);
-}
-.big-title {
-    font-size: 32px;
-    font-weight: bold;
-    color: #B03A2E;
-}
-.footer {
-    text-align:center;
-    font-size:12px;
-    color:gray;
-    margin-top:40px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ================== DATABASE ================== #
+# ================= DATABASE ================= #
 
 conn = sqlite3.connect("hospitality.db", check_same_thread=False)
 c = conn.cursor()
@@ -43,18 +19,17 @@ c = conn.cursor()
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# USERS TABLE
+# USERS
 c.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
     password TEXT,
-    role TEXT,
-    can_add INTEGER DEFAULT 0
+    role TEXT
 )
 """)
 
-# GUESTS TABLE
+# GUESTS
 c.execute("""
 CREATE TABLE IF NOT EXISTS guests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +42,7 @@ CREATE TABLE IF NOT EXISTS guests (
 )
 """)
 
-# FEEDBACK TABLE
+# FEEDBACK
 c.execute("""
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,24 +59,23 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 conn.commit()
 
-# CREATE DEFAULT ADMIN
-admin_check = pd.read_sql_query("SELECT * FROM users WHERE role='admin'", conn)
+# DEFAULT ADMIN
+admin_check = pd.read_sql_query("SELECT * FROM users WHERE username='admin'", conn)
 if admin_check.empty:
     c.execute("""
-    INSERT INTO users (username,password,role,can_add)
-    VALUES (?,?,?,?)
-    """, ("admin", hash_password("admin123"), "admin",1))
+    INSERT INTO users (username,password,role)
+    VALUES (?,?,?)
+    """, ("admin", hash_password("admin123"), "admin"))
     conn.commit()
 
-# ================== FEEDBACK PAGE ================== #
+# ================= FEEDBACK PAGE ================= #
 
 query = st.query_params
 
 if "feedback" in query:
     guest_id = query["feedback"]
 
-    st.markdown('<div class="main-card">', unsafe_allow_html=True)
-    st.markdown('<div class="big-title">CARNIVALE ❤️ We Value Your Feedback</div>', unsafe_allow_html=True)
+    st.title("CARNIVALE ❤️ We Value Your Feedback")
 
     food = st.slider("🍽 Food Quality",1,5)
     service = st.slider("🛎 Service",1,5)
@@ -121,47 +95,42 @@ if "feedback" in query:
         st.success("Thank You For Visiting CARNIVALE 🙏")
         st.balloons()
 
-    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<center><small>Created by RJ_RAUNAK</small></center>", unsafe_allow_html=True)
     st.stop()
 
-# ================== LOGIN ================== #
+# ================= SESSION ================= #
 
 if "user" not in st.session_state:
     st.session_state.user = None
     st.session_state.role = None
 
+# ================= LOGIN ================= #
+
 if st.session_state.user is None:
 
     st.title("CARNIVALE - Login")
 
-    users = pd.read_sql_query("SELECT username FROM users", conn)
-
-    if users.empty:
-        st.error("No users found")
-        st.stop()
-
-    selected_user = st.selectbox("Select Your ID", users["username"])
-    password = st.text_input("Enter Password", type="password")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
     if st.button("Login"):
         user = pd.read_sql_query(
             "SELECT * FROM users WHERE username=? AND password=?",
             conn,
-            params=(selected_user, hash_password(password))
+            params=(username, hash_password(password))
         )
 
         if not user.empty:
-            st.session_state.user = selected_user
+            st.session_state.user = username
             st.session_state.role = user["role"][0]
             st.rerun()
         else:
-            st.error("Wrong Password")
+            st.error("Invalid Credentials")
 
-    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
+    st.markdown("<center><small>Created by RJ_RAUNAK</small></center>", unsafe_allow_html=True)
     st.stop()
 
-# ================== LOGOUT ================== #
+# ================= LOGOUT ================= #
 
 st.sidebar.write(f"Logged in as: {st.session_state.user}")
 if st.sidebar.button("Logout"):
@@ -169,27 +138,76 @@ if st.sidebar.button("Logout"):
     st.session_state.role = None
     st.rerun()
 
-# ================== STAFF PANEL ================== #
+# ================= ADMIN PANEL ================= #
 
-if st.session_state.role in ["staff","admin"]:
+if st.session_state.role == "admin":
+
+    st.sidebar.markdown("## 🔐 Admin Panel")
+
+    # ADD USER
+    with st.sidebar.expander("➕ Add User"):
+        new_user = st.text_input("New Username")
+        new_pass = st.text_input("New Password", type="password")
+        new_role = st.selectbox("Role", ["staff", "admin"])
+
+        if st.button("Create User"):
+            try:
+                c.execute("""
+                INSERT INTO users (username,password,role)
+                VALUES (?,?,?)
+                """,(new_user, hash_password(new_pass), new_role))
+                conn.commit()
+                st.success("User Created")
+            except:
+                st.error("Username exists")
+
+    # RESET PASSWORD
+    with st.sidebar.expander("🔄 Reset Password"):
+        users_list = pd.read_sql_query("SELECT username FROM users", conn)
+        selected_user = st.selectbox("Select User", users_list["username"])
+        new_password = st.text_input("New Password", type="password")
+
+        if st.button("Update Password"):
+            c.execute("""
+            UPDATE users SET password=? WHERE username=?
+            """,(hash_password(new_password), selected_user))
+            conn.commit()
+            st.success("Password Updated")
+
+    # DELETE USER
+    with st.sidebar.expander("❌ Delete User"):
+        users_list = pd.read_sql_query("SELECT username FROM users WHERE username!='admin'", conn)
+        del_user = st.selectbox("Select User to Delete", users_list["username"])
+
+        if st.button("Delete User"):
+            c.execute("DELETE FROM users WHERE username=?", (del_user,))
+            conn.commit()
+            st.success("User Deleted")
+
+    # VIEW USERS
+    with st.sidebar.expander("👥 View Users"):
+        users_data = pd.read_sql_query("SELECT id,username,role FROM users", conn)
+        st.dataframe(users_data)
+
+# ================= GUEST ENTRY ================= #
+
+if st.session_state.role in ["admin","staff"]:
 
     st.title("CARNIVALE - Guest Entry")
 
     name = st.text_input("Guest Name")
     mobile = st.text_input("Mobile Number")
-
     category = st.selectbox(
         "Category",
         ["Swiggy", "Zomato", "Party", "Easy Dinner", "VIP", "Walk-in", "Other"]
     )
-
     pax = st.number_input("Number of Guests (PAX)", min_value=1, step=1)
     visit_date = st.date_input("Visit Date")
 
     if st.button("Submit Entry"):
 
         if name == "" or mobile == "":
-            st.warning("Please fill required fields")
+            st.warning("Fill required fields")
         else:
             c.execute("""
             INSERT INTO guests (name,mobile,category,pax,visit_date,staff_name)
@@ -198,7 +216,6 @@ if st.session_state.role in ["staff","admin"]:
             conn.commit()
 
             guest_id = c.lastrowid
-
             feedback_link = f"{APP_URL}/?feedback={guest_id}"
 
             message = f"""Thank you for visiting CARNIVALE 🙏
@@ -206,17 +223,37 @@ if st.session_state.role in ["staff","admin"]:
 Please share your valuable feedback:
 {feedback_link}
 """
-
-            encoded_message = urllib.parse.quote(message)
-            whatsapp_link = f"https://wa.me/?text={encoded_message}"
+            encoded = urllib.parse.quote(message)
+            whatsapp_link = f"https://wa.me/?text={encoded}"
 
             st.success("Entry Added Successfully ✅")
             st.link_button("📲 Send on WhatsApp", whatsapp_link)
-            st.write("Or Copy Link:")
             st.code(feedback_link)
 
     st.subheader("All Guest Entries")
     data = pd.read_sql_query("SELECT * FROM guests", conn)
     st.dataframe(data)
 
-    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
+    # ================= ANALYTICS ================= #
+
+    st.subheader("📊 Feedback Analytics")
+
+    feedback_data = pd.read_sql_query("SELECT * FROM feedback", conn)
+
+    if not feedback_data.empty:
+        avg_food = round(feedback_data["food"].mean(),2)
+        avg_service = round(feedback_data["service"].mean(),2)
+        avg_behaviour = round(feedback_data["behaviour"].mean(),2)
+        avg_ambience = round(feedback_data["ambience"].mean(),2)
+        avg_clean = round(feedback_data["cleanliness"].mean(),2)
+
+        st.write("Average Ratings:")
+        st.write(f"Food: {avg_food}")
+        st.write(f"Service: {avg_service}")
+        st.write(f"Behaviour: {avg_behaviour}")
+        st.write(f"Ambience: {avg_ambience}")
+        st.write(f"Cleanliness: {avg_clean}")
+    else:
+        st.info("No feedback yet")
+
+    st.markdown("<center><small>Created by RJ_RAUNAK</small></center>", unsafe_allow_html=True)
