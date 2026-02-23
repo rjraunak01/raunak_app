@@ -5,7 +5,7 @@ from datetime import datetime
 import hashlib
 import urllib.parse
 
-st.set_page_config(page_title="Hospitality CRM PRO", layout="wide")
+st.set_page_config(page_title="CARNIVALE - Hospitality CRM", layout="wide")
 
 # ---------------- STYLE ---------------- #
 
@@ -18,9 +18,15 @@ st.markdown("""
     box-shadow: 0px 10px 25px rgba(0,0,0,0.1);
 }
 .big-title {
-    font-size: 30px;
+    font-size: 32px;
     font-weight: bold;
-    color: #1F618D;
+    color: #B03A2E;
+}
+.footer {
+    text-align:center;
+    font-size:12px;
+    color:gray;
+    margin-top:40px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -95,13 +101,14 @@ if "feedback" in query:
     guest_id = query["feedback"]
 
     st.markdown('<div class="main-card">', unsafe_allow_html=True)
-    st.markdown('<div class="big-title">We Value Your Feedback ❤️</div>', unsafe_allow_html=True)
+    st.markdown('<div class="big-title">CARNIVALE ❤️ We Value Your Feedback</div>', unsafe_allow_html=True)
 
     food = st.slider("🍽 Food Quality",1,5)
     service = st.slider("🛎 Service",1,5)
     behaviour = st.slider("😊 Staff Behaviour",1,5)
     ambience = st.slider("✨ Ambience",1,5)
     cleanliness = st.slider("🧼 Cleanliness",1,5)
+
     comment = st.text_area("Additional Comments")
 
     if st.button("Submit Feedback"):
@@ -112,9 +119,10 @@ if "feedback" in query:
         """,(guest_id,food,service,behaviour,ambience,cleanliness,
              comment,datetime.now()))
         conn.commit()
-        st.success("Thank You For Visiting 🙏")
+        st.success("Thank You For Visiting CARNIVALE 🙏")
         st.balloons()
 
+    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
@@ -126,7 +134,7 @@ if "user" not in st.session_state:
 
 if st.session_state.user is None:
 
-    st.title("Hospitality CRM Login")
+    st.title("CARNIVALE - Login")
 
     users = pd.read_sql_query(
         "SELECT username FROM users ORDER BY role DESC, username ASC",
@@ -150,15 +158,25 @@ if st.session_state.user is None:
         else:
             st.error("Wrong Password")
 
+    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
     st.stop()
 
 role = st.session_state.role
+
+# ---------------- LOGOUT BUTTON ---------------- #
+
+st.sidebar.write(f"Logged in as: {st.session_state.user}")
+
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.session_state.role = None
+    st.rerun()
 
 # ---------------- STAFF PANEL ---------------- #
 
 if role == "staff":
 
-    st.title("Staff Dashboard")
+    st.title("CARNIVALE - Staff Dashboard")
 
     user_data = pd.read_sql_query(
         "SELECT * FROM users WHERE username=?",
@@ -168,9 +186,15 @@ if role == "staff":
 
     if user_data["can_add"] == 1:
         st.subheader("Add Guest Entry")
+
         name = st.text_input("Guest Name")
         mobile = st.text_input("Mobile")
-        category = st.text_input("Source")
+
+        category = st.selectbox(
+            "Category",
+            ["Swiggy", "Zomato", "Party", "Easy Dinner", "VIP", "Walk-in", "Other"]
+        )
+
         visit_date = st.date_input("Visit Date")
 
         if st.button("Submit Entry"):
@@ -183,15 +207,10 @@ if role == "staff":
 
             guest_id = c.lastrowid
 
-            # Auto Base URL
-            base_url = st.get_option("browser.serverAddress")
-            if not base_url:
-                base_url = "http://localhost:8501"
-
+            base_url = st.request.host_url.rstrip("/")
             feedback_link = f"{base_url}/?feedback={guest_id}"
 
-            message = f"""
-Thank you for visiting us 🙏
+            message = f"""Thank you for visiting CARNIVALE 🙏
 
 Please share your valuable feedback:
 {feedback_link}
@@ -201,7 +220,6 @@ Please share your valuable feedback:
             whatsapp_link = f"https://wa.me/?text={encoded_message}"
 
             st.success("Entry Added Successfully ✅")
-
             st.link_button("📲 Send on WhatsApp", whatsapp_link)
             st.code(feedback_link)
 
@@ -214,19 +232,13 @@ Please share your valuable feedback:
     st.subheader("My Entries")
     st.dataframe(my_data)
 
-    st.subheader("Change Password")
-    new_pass = st.text_input("New Password", type="password")
-    if st.button("Change Password"):
-        c.execute("UPDATE users SET password=? WHERE username=?",
-                  (hash_password(new_pass),st.session_state.user))
-        conn.commit()
-        st.success("Password Updated")
+    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
 
 # ---------------- ADMIN PANEL ---------------- #
 
 if role == "admin":
 
-    st.title("Admin Dashboard")
+    st.title("CARNIVALE - Admin Dashboard")
 
     menu = st.sidebar.radio("Menu",
         ["Overview","Create Staff","Reports","Delete Guest","Export All","Change Password"])
@@ -258,15 +270,16 @@ if role == "admin":
 
     if menu == "Reports":
 
+        st.subheader("Repeat Customers")
         repeat = pd.read_sql_query("""
         SELECT name,mobile,COUNT(*) as visits
         FROM guests
         GROUP BY mobile
         HAVING visits>1
         """, conn)
-        st.subheader("Repeat Customers")
         st.dataframe(repeat)
 
+        st.subheader("Feedback Report")
         feedback_data = pd.read_sql_query("""
         SELECT g.name,g.mobile,
         f.food,f.service,f.behaviour,
@@ -275,7 +288,6 @@ if role == "admin":
         FROM feedback f
         JOIN guests g ON f.guest_id=g.id
         """, conn)
-        st.subheader("Feedback Report")
         st.dataframe(feedback_data)
 
     if menu == "Delete Guest":
@@ -298,3 +310,5 @@ if role == "admin":
                       (hash_password(new_pass),))
             conn.commit()
             st.success("Password Updated")
+
+    st.markdown('<div class="footer">Created by RJ_RAUNAK</div>', unsafe_allow_html=True)
