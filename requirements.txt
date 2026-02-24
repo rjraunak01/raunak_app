@@ -1,5 +1,9 @@
-streamlit
-pandas
-plotly
-qrcode[pil]
-Pillow
+branches
+users
+permissions
+guests
+feedback
+edit_logs
+audit_logs
+salary_records
+notifications
